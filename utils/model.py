@@ -75,15 +75,15 @@ def invoke_completion(message: str) -> tuple[str, any]:
     )
 
     try:
-        response = client.chat.completions.create(
+        # Using the new Responses API
+        response = client.responses.create(
             model=COMPLETION_MODEL_NAME,
-            messages=[{
-                'role': 'user',
-                'content': message
-            }],
+            input=message,  # Simply pass the message as input
+            tools=[{"type": "web_search"}],
+            tool_choice={"type":"web_search"},
             **COMPLETION_HYPER_PARAMETER
         )
-        answer = response.choices[0].message.content
+        answer = response.output_text  # Use output_text instead of choices[0].message.content
         usage = response.usage
 
     except Exception as error:
@@ -100,12 +100,27 @@ def invoke_vision(message: any) -> tuple[str, any]:
     )
 
     try:
-        response = client.chat.completions.create(
+        # Extract text and images from the message structure
+        content = message[0]['content']
+
+        # Extract text input (first text block or empty string)
+        text_content = next((item['text'] for item in content if item['type'] == 'text'), "")
+
+        # Extract image URLs
+        image_urls = []
+        for item in content:
+            if item['type'] == 'image_url':
+                img_url = item['image_url']['url']
+                image_urls.append(img_url)
+
+        # Create the call with the new Responses API
+        response = client.responses.create(
             model=VISION_MODEL_NAME,
-            messages=message,
+            input=text_content,
+            input_images=image_urls if image_urls else None,
             **VISION_HYPER_PARAMETER
         )
-        answer = response.choices[0].message.content
+        answer = response.output_text
         usage = response.usage
 
     except Exception as error:

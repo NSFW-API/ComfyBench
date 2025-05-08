@@ -18,7 +18,7 @@ embedding:
 completion:
   base_url: null
   api_key: null
-  model_name: "chatgpt-4o-latest"
+  model_name: "gpt-4.1"
   hyper_parameter:
     temperature: 0.0
     top_p: 1.0
@@ -27,7 +27,7 @@ completion:
 vision:
   base_url: null
   api_key: null
-  model_name: "chatgpt-4o-latest"
+  model_name: "gpt-4.1"
   hyper_parameter:
     temperature: 0.0
     top_p: 1.0
