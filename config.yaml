@@ -8,16 +8,22 @@ comfyui:
   comfyui_address: "127.0.0.1:8188"
   execution_timeout: 300
 
+# web search settings
+web_search:
+  enabled: true
+  max_results: 10
+  token_budget: 50000
+
 # embedding api for retrieval
 embedding:
   base_url: null
-  api_key: null
+  api_key:
   model_name: "text-embedding-3-large"
 
 # completion api for agent
 completion:
   base_url: null
-  api_key: null
+  api_key:
   model_name: "gpt-4.1"
   hyper_parameter:
     temperature: 0.0
@@ -26,7 +32,7 @@ completion:
 # vision api for evaluation
 vision:
   base_url: null
-  api_key: null
+  api_key:
   model_name: "gpt-4.1"
   hyper_parameter:
     temperature: 0.0

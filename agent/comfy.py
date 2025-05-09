@@ -4,8 +4,9 @@ import json
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
 
+from utils.adapter import json_adapter
 from utils.parser import parse_code_to_prompt
-from utils.model import ReferenceStorage, invoke_completion
+from utils.model import ReferenceStorage, invoke_completion, invoke_llm_with_websearch
 
 
 class ComfyAgentState(object):
@@ -75,65 +76,69 @@ def format_analyzer_agent_prompt(instruction: str) -> str:
 planner_prompt = '''
 ## Task
 
-ComfyUI uses workflows to create and execute Stable Diffusion pipelines so that users can design their own workflows to generate highly customized artworks. ComfyUI workflows can be formulated into the equivalent Python code, where each statement represents the execution of a single node. You are an expert in ComfyUI, helping users to design workflows according to their requirements.
+ComfyUI uses workflows to create and execute Stable-Diffusion pipelines so that users can design their own workflows to generate highly-customised artworks.  
+You are an expert in ComfyUI helping users to design workflows according to their requirements.
 
-Now you are required to create a ComfyUI workflow to finish the following task:
+You must create a ComfyUI workflow for the following task:
 
 {instruction}
 
-The core requirements and the expected paradigm are analyzed as follows:
+The core requirements and expected paradigm have been analysed as follows:
 
 {analysis}
 
-Improving the quality of the generation result with additional steps, such as upscaling and interpolation, is not recommended, unless specified in the requirements.
+---
 
-## Reference
-
-According to the requirements, we have retrieved some relevant workflows which may be helpful:
+## Reference  ( includes snippets fetched from the live web )
 
 {reference}
 
-## History
+### Context – about those references
+* Some items above are **fresh web-search excerpts** and can be partially irrelevant or noisy.  
+* **Ignore** text that is clearly off-topic or not useful for building the workflow.
 
-Here is a recent history of your thought, plan and action in the previous steps. The most recent record is at the bottom.
+---
+
+## History  (latest entry last)
 
 {history}
 
-## Workspace
+---
 
-The code and annotation of the current workflow you are working on are presented as follows:
+## Current Workspace
 
 {workspace}
 
-## Action
+---
 
-Based on the history and workspace, you should first think about what functions have been implemented and what modules remain to be added. Your thought should be enclosed with "<thought>" tag. For example: <thought>The basic pipeline has been implemented, but a module is needed to improve the quality.</thought>.
+## Your job / remaining steps
+There are **{limitation} steps** left before the agent must finish.  
+At each step decide what to do next.
 
-After that, you should update your step-by-step plan to further modify your workflow. There are {limitation} steps remaining, so your plan should contain at most {limitation} steps. Make sure that each step is feasible to be converted into a single action. Your plan should be enclosed with "<plan>" tag. For example: <plan>Step 1: I will refer to "reference_name" to add a module. Step 2: I will finish the task since the expected effects are realized.</plan>.
+### Available actions
+* `load name=<reference_name>` – replace workspace with a reference workflow  
+* `combine name=<reference_name>` – merge a reference workflow into workspace  
+* `adapt prompt="<brief change description>"` – tweak parameters / prompts  
+* `retrieve prompt="<what you still need>"` – fetch new references  
+* `finish` – declare the workflow complete
 
-Finally, you should choose one of the following actions and specify the arguments (if required), so that the updated workflow can realize the first step in your plan. You should provide your action with the format of function calls in Python. Your action should be enclosed with "<action>" tag. For example: <action>combine(name="reference_name")</action>, <action>adapt(prompt="Change the factor to 0.5 and rewrite the prompt.")</action>, and <action>finish()</action>.
+---
 
-- `load`: Load a reference workflow into the workspace to replace the current workflow, so that you can start over. Arguments:
-  - `name`: The name of the reference workflow you want to load.
-- `combine`: Combine the current workflow with a reference workflow, so that necessary modules can be added. Arguments:
-  - `name`: The name of the reference workflow you want to combine.
-- `adapt`: Adapt some parameters in the current workflow, so that the expected effects can be realized. Arguments:
-  - `prompt`: The prompt to specify the adaptation you want to make.
-- `retrieve`: Retrieve a new batch of reference workflows, so that more useful references can be found. Arguments:
-  - `prompt`: The prompt to describe the reference you want to retrieve.
-- `finish`: Finish the task since the current workflow can realize the expected effects.
+## Output Guidelines  ( free-form )
 
-Refer to the history before making a decision. Here are some general rules you should follow:
+* **Write naturally** – no XML/JSON tags are required; structured formatting will be added later.  
+* A helpful convention (not mandatory) is to prefix sections like:  
+Thought: ...
+Plan: ...
+Action: combine name=text_to_image_basic
+The adapter layer will parse whatever you write.
 
-1. You should choose the `load` action if and only if the history is empty.
-2. If you choose the `load` or `combine` action, make sure the name exists in the reference. Otherwise, try to update the reference with the `retrieve` action.
-3. You should not choose the `adapt` action twice in a row, because they can be simplified into a single action.
-4. If you choose the `adapt` or `retrieve` action, make sure the prompt is concise and contains all the necessary information.
-5. You should choose the `finish` action before the remaining steps count down to 0.
+* Keep the **Action** on its own line, starting with the word **Action:** followed by one of the commands above.
 
-Now, provide your thought, plan and action with the required format.
+* Respect the general rules you already know (e.g. don’t `adapt` twice in a row, don’t `load` unless history is empty, and finish before steps run out).
+
+Now think, plan, and state your next action.
 '''
-
 
 def format_planner_agent_prompt(state: ComfyAgentState) -> str:
     instruction_content = state.instruction
@@ -458,17 +463,24 @@ class ComfyPipeline(object):
 
         # generate workflow
         for step in range(1, self.step_limitation + 1):
+            # ----- 1️⃣  Ask the LLM WITH web-search but WITHOUT JSON mode  -----
             message = format_planner_agent_prompt(state)
-            print(' Planner Prompt '.center(80, '-'))
-            print(message)
-            print()
-            planning, usage = invoke_completion(message)
-            print(' Planner Answer '.center(80, '-'))
-            print(planning)
-            print(usage)
-            print()
+            raw_answer, usage = invoke_llm_with_websearch(message)
 
-            thought, plan, action = parse_planner_agent_answer(planning)
+            # ----- 2️⃣  Feed that prose to the adapter for structured output  -----
+            planner_schema = (
+                'Return a JSON object with keys "thought", "plan", and "action". '
+                '"thought": string   # your internal reasoning\n'
+                '"plan":   string   # numbered or bulleted steps\n'
+                '"action": string   # one of: load … / combine … / adapt … / retrieve … / finish'
+            )
+            parsed = json_adapter(raw_answer, planner_schema)
+
+            # ----- 3️⃣  Extract & proceed exactly as before  -----
+            thought = parsed["thought"]
+            plan = parsed["plan"]
+            action = parsed["action"]
+
             command, arguments = parse_planner_agent_action(action)
             state.update_history(thought, plan, action)
             print(' Parsed Thought '.center(80, '-'))

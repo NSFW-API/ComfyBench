@@ -49,7 +49,7 @@ The core requirements and the expected paradigm are analyzed as follows:
 
 ## Reference
 
-According to the requirements, we have retrieved some relevant workflows which may be helpful:
+According to the requirements, we have retrieved some relevant workflows which may be helpful (includes up-to-date web documentation):
 
 {reference}
 
